@@ -1,0 +1,154 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: "off"
+  CGO_ENABLED: "0"
+  # The fileshare release whose admin.proto internal/adminpb is generated
+  # from, and the portal the browser test runs behind.
+  FILESHARE_VERSION: v0.28.1
+  PORTAL_VERSION: v0.1.1
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      - run: go vet ./...
+      - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          [ -z "$unformatted" ] || { echo "::error::not gofmt-clean:"; echo "$unformatted"; exit 1; }
+      - run: go test -count=1 ./...
+      - name: The browser build, which is where it runs
+        shell: bash
+        run: GOOS=js GOARCH=wasm go vet . && GOOS=js GOARCH=wasm go build -o /dev/null . && GOOS=js GOARCH=wasm go build -tags e2e -o /dev/null .
+
+  race:
+    name: race detector
+    runs-on: ubuntu-latest
+    env: { CGO_ENABLED: "1" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      - run: go test -race -count=1 ./...
+
+  coverage:
+    name: coverage (floor recorded; the standard is 100%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      # The console and its portal client; not the generated code, nor the
+      # test stand-in for the portal.
+      - run: |
+          set -o pipefail
+          FLOOR=92.0
+          go test -coverprofile=cover.out -coverpkg=github.com/go-fileshare/console,github.com/go-fileshare/console/internal/admin ./... >/dev/null
+          go tool cover -func=cover.out | grep -v "100.0%"
+          cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "coverage: ${cov}%  floor: ${FLOOR}%  standard: 100%"
+          if awk -v c="$cov" -v f="$FLOOR" 'BEGIN{exit !(c+0 < f+0)}'; then
+            echo "::error::coverage ${cov}% fell below the recorded floor ${FLOOR}%"; exit 1
+          fi
+
+  # internal/adminpb is generated here from fileshare's admin.proto -- the
+  # messages and a Connect client, without the gRPC stubs fileshare's own
+  # package carries, which put 3 MB of compressed wasm in every page. It must
+  # stay the released contract: the .proto byte for byte, and the Go what
+  # the pinned generators make of it.
+  proto:
+    name: admin.proto is fileshare's, and adminpb is generated from it
+    runs-on: ubuntu-latest
+    env: { PROTOC_VERSION: "34.1" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      - run: |
+          set -euo pipefail
+          src=$(GOFLAGS=-mod=mod go mod download -json "github.com/go-fileshare/fileshare@${FILESHARE_VERSION}" | python3 -c 'import json,sys;print(json.load(sys.stdin)["Dir"])')
+          cmp "$src/proto/fileshare/admin/v1/admin.proto" proto/fileshare/admin/v1/admin.proto || {
+            echo "::error::proto/fileshare/admin/v1/admin.proto is not fileshare ${FILESHARE_VERSION}'s"; exit 1; }
+          curl -fsSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          sudo unzip -q -o /tmp/protoc.zip -d /usr/local bin/protoc 'include/*'
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@v2.0.0
+          M="Mfileshare/admin/v1/admin.proto=github.com/go-fileshare/console/internal/adminpb;adminpb"
+          protoc -I proto --go_out=. --go_opt=module=github.com/go-fileshare/console --go_opt="$M" \
+            --connect-go_out=. --connect-go_opt=module=github.com/go-fileshare/console --connect-go_opt="$M" \
+            proto/fileshare/admin/v1/admin.proto
+          untracked=$(git ls-files --others --exclude-standard -- internal/adminpb)
+          git diff --exit-code -- internal/adminpb && [ -z "$untracked" ] || {
+            echo "::error::internal/adminpb is not what protoc generates from admin.proto"; echo "$untracked"; exit 1; }
+
+  mvvm:
+    name: MVVM gate
+    uses: go-widgets/mvvmlint/.github/workflows/mvvmlint.yml@main
+    # Its default is 1.27.1, with GOTOOLCHAIN=local: it could not build a
+    # module that requires 1.27.2 (GO-2026-6617), and failed before linting.
+    with:
+      go-version: "1.27.2"
+
+  bricolint:
+    name: Hand-drawn-UI gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      - run: go install github.com/go-widgets/bricolint/cmd/bricolint@v0.1.0
+      - run: go vet -vettool="$(go env GOPATH)/bin/bricolint" ./...
+      - name: Negative control (the guard must bite)
+        run: BRICOLINT="$(go env GOPATH)/bin/bricolint" bash hack/bricolint-negative-control.sh
+
+  # The console as deployed: console.wasm in headless Chrome, behind the
+  # portal binary over TLS, in front of two fileshare binaries. It logs in,
+  # lists, creates a share, and the right server audits it.
+  browser:
+    name: In a browser, behind the portal, in front of fileshare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      - run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/go-fileshare/portal@${PORTAL_VERSION}"
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/go-fileshare/fileshare@${FILESHARE_VERSION}"
+      - name: The browser test, which must run rather than skip
+        working-directory: e2e
+        run: |
+          set -o pipefail
+          PORTAL="$RUNNER_TEMP/bin/portal" FILESHARE="$RUNNER_TEMP/bin/fileshare" CHROME="$(command -v google-chrome)" \
+            go test -count=1 -v ./... | tee e2e.log
+          grep -q -- '--- PASS: TestE2EConsoleInABrowserBehindThePortal' e2e.log
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod, cache: true }
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
