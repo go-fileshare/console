@@ -25,7 +25,9 @@ in at your identity provider and comes back. It never holds a token: it calls
 `/api/<server>/fileshare.admin.v1.AdminService/<Method>` on the portal, which
 adds the token of that server.
 
-What the console does with the portal:
+What the console does with the portal, through its client package
+([`portal/client`](https://github.com/go-fileshare/portal#the-uis-side-client),
+which the explorer uses too):
 
 - **A token per server, refreshed once.** When the portal answers that a server's
   token is missing or expiring (`401`, `Portal-Refresh`), the console asks it to
@@ -34,18 +36,20 @@ What the console does with the portal:
   refresh at every click.
 - **One refresh at a time, across tabs.** A provider that rotates refresh tokens
   ends the whole login when one is spent twice. Refreshes therefore go through
-  the browser's Web Locks API, so two tabs never refresh together. Before each
-  refresh, the console checks whether another tab has just done it.
+  the browser's Web Locks API, so two tabs never refresh together, nor a
+  console and an explorer tab, which share the session: both take the lock
+  `fileshare-portal-refresh`. Before each refresh, the console checks whether
+  another tab has just done it.
 - **The portal's CSRF defence.** Every call carries `Portal-Request: 1`. The page
   loads no inline script, which the portal's Content-Security-Policy would
   refuse.
 
-The page weighs **5.4 MB compressed** (23 MB of wasm; `build.sh` writes the
+The page weighs **5.5 MB compressed** (23 MB of wasm; `build.sh` writes the
 `.gz` and the portal sends it). It used to be 7.1 MB. `internal/adminpb` is
 generated here from fileshare's `admin.proto`, the messages and a Connect client
 only, because fileshare's own package carries gRPC stubs, and those alone put
 3 MB of compressed gRPC in the page. CI checks that the `.proto` is byte for byte
-fileshare v0.28.1's, and that the generated code is what the pinned generators
+fileshare v0.29.0's, and that the generated code is what the pinned generators
 make of it.
 
 ## Natively

@@ -26,6 +26,8 @@ github.com/go-crdt/collab v0.74.0 h1:Q+fv5M57UOGzgse9khZEYNCDPxY2kH4CHhEXqSV/6qc
 github.com/go-crdt/collab v0.74.0/go.mod h1:o1aOUE4PI5EfvNPzetDO/cgoGStcuCQueoPaFTf4LiU=
 github.com/go-crdt/crdt v0.55.0 h1:D/LHQ4OgSJRomMvEeYzRwwnP0hnXGngWevXglmpXIxI=
 github.com/go-crdt/crdt v0.55.0/go.mod h1:vbfvns9B9FUaMi2sPKzMYttKmbxfgO7EK3Yu82SrlYw=
+github.com/go-fileshare/portal v0.2.0 h1:FCWHsYjQBsvrWs1do1Sk6L93dGGX+OPKY/Y/yd3PEYs=
+github.com/go-fileshare/portal v0.2.0/go.mod h1:SBKWNiYHuJsEHa4mO7a69WXMiaiA8eqJrT2G9KpPS0A=
 github.com/go-freedesktop/x11 v0.3.0 h1:DAZN7uAt8eQOyav90VduelaEJyTdWlAZjOTZOKvumxM=
 github.com/go-freedesktop/x11 v0.3.0/go.mod h1:6GsirPySzG8JmIhqUYc0bDcMfrXuaGf9iRsOWSP8JsU=
 github.com/go-gfx/gfx v0.35.0 h1:AaXMxDMxNB1hROxzx+3EoO06KxsrQUvnw/10olmSgVo=
