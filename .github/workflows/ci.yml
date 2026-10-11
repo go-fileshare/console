@@ -16,7 +16,7 @@ env:
   # The fileshare release whose admin.proto internal/adminpb is generated
   # from, and the portal the browser test runs behind.
   FILESHARE_VERSION: v0.28.1
-  PORTAL_VERSION: v0.1.1
+  PORTAL_VERSION: v0.1.2
 
 jobs:
   test:
@@ -60,10 +60,11 @@ jobs:
       - uses: actions/setup-go@v7
         with: { go-version-file: go.mod, cache: true }
       # The console and its portal client; not the generated code, nor the
-      # test stand-in for the portal.
+      # test stand-in for the portal. What is left is mostly the native
+      # main(), which opens a window and the system browser.
       - run: |
           set -o pipefail
-          FLOOR=92.0
+          FLOOR=90.0
           go test -coverprofile=cover.out -coverpkg=github.com/go-fileshare/console,github.com/go-fileshare/console/internal/admin ./... >/dev/null
           go tool cover -func=cover.out | grep -v "100.0%"
           cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
@@ -121,8 +122,9 @@ jobs:
         run: BRICOLINT="$(go env GOPATH)/bin/bricolint" bash hack/bricolint-negative-control.sh
 
   # The console as deployed: console.wasm in headless Chrome, behind the
-  # portal binary over TLS, in front of two fileshare binaries. It logs in,
-  # lists, creates a share, and the right server audits it.
+  # portal binary over TLS, in front of two fileshare binaries -- and the
+  # native backend, logging in through a loopback listener, against the same
+  # two. Each logs in, lists, creates a share, and the right server audits it.
   browser:
     name: In a browser, behind the portal, in front of fileshare
     runs-on: ubuntu-latest
@@ -140,6 +142,7 @@ jobs:
           PORTAL="$RUNNER_TEMP/bin/portal" FILESHARE="$RUNNER_TEMP/bin/fileshare" CHROME="$(command -v google-chrome)" \
             go test -count=1 -v ./... | tee e2e.log
           grep -q -- '--- PASS: TestE2EConsoleInABrowserBehindThePortal' e2e.log
+          grep -q -- '--- PASS: TestE2ENativeAgainstRealServers' e2e.log
 
   vuln:
     name: govulncheck

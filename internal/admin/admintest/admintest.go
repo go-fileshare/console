@@ -73,14 +73,7 @@ type Server struct {
 func New(loggedIn bool, servers ...*Server) *Portal {
 	p := &Portal{loggedIn: loggedIn, tokens: map[string]time.Time{}, servers: map[string]*Server{}}
 	for _, s := range servers {
-		if s.shares == nil {
-			s.shares = map[string]*v1.Share{}
-		}
-		srv := connect.NewServer()
-		adminv1connect.RegisterAdminServiceHandler(srv, s)
-		mux := http.NewServeMux()
-		connecthttp.Mount(mux, srv)
-		s.h = mux
+		s.h = s.Handler()
 		p.servers[s.ID] = s
 		p.order = append(p.order, s.ID)
 	}
@@ -356,4 +349,17 @@ func (s *Server) Names() []string {
 		out = append(out, sh.GetName())
 	}
 	return out
+}
+
+// Handler is the server's admin API as a Connect handler, to be served on its
+// own -- as a native console reaches a server, without a portal.
+func (s *Server) Handler() http.Handler {
+	if s.shares == nil {
+		s.shares = map[string]*v1.Share{}
+	}
+	srv := connect.NewServer()
+	adminv1connect.RegisterAdminServiceHandler(srv, s)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	return mux
 }

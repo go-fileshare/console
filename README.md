@@ -52,13 +52,41 @@ make of it.
 
 ```sh
 go install github.com/go-fileshare/console@latest
-console -demo
+console                     # reads ~/Library/Application Support/fileshare-console/console.hcl (macOS)
+console -config my.hcl      # or $XDG_CONFIG_HOME/fileshare-console/console.hcl elsewhere
+console -demo               # over a built-in stand-in, to see it without servers
 ```
 
-`-demo` opens the console over a built-in stand-in for the portal, with two
-servers and a few shares, to see it and try it. **Logging in natively is not
-there yet:** without a portal, the native console has to run the OpenID login
-and hold its own tokens. That is the next step.
+Natively there is no portal: the console logs in itself and calls each server
+directly.
+
+```hcl
+issuer "https://login.example.org" {
+  client_id = "fileshare-console"     # a PUBLIC client: no secret
+}
+
+server "paris" {
+  label    = "Paris"
+  url      = "https://fs-paris.example.org:8443"   # fileshare's admin { web { listen } }
+  resource = "https://fs-paris.example.org/"       # that server's audience
+  # ca_file = "fs-ca.pem"                          # relative to this file
+}
+```
+
+- **Logging in** goes through the **system browser** and a listener on
+  `127.0.0.1`, with [go-authn/rp](https://github.com/go-authn/rp) (RFC 8252):
+  PKCE, state, nonce, and a knock on the port with another `state` is ignored.
+  The client is public, because a secret shipped inside an application is no
+  secret. [go-authn/bridge](https://github.com/go-authn/bridge) accepts any
+  loopback port for a client registered with `http://127.0.0.1/callback`.
+- **Each server gets a token addressed to it alone** (`resource`, RFC 8707),
+  bought with the refresh token. The refresh token stays **in memory only** and
+  is spent one refresh at a time. Without that lock, two concurrent refreshes
+  trigger the provider's reuse detection and the login is lost; the test checks
+  exactly that.
+- A server that refuses its token gets one refresh and one retry. A grant that
+  has ended means logging in again, in the browser.
+- **Only https servers.** A bearer token sent in the clear is anybody's.
 
 ## What it does
 
@@ -112,7 +140,15 @@ go test -race ./...
   creates a share there, and A's audit names `oidc=<issuer> alice-sub` while B
   audits nothing. With go-widgets/window v0.87.0, whose browser tab could not
   be woken, the same test stays on "Loading...": the answers wait in the queue
-  for a frame that never comes.
+  for a frame that never comes. A second test runs the native backend against
+  the same two real servers: loopback login as a public client, a token per
+  server, a share created on A and audited there.
+- **Native backend:** in-process provider (public client, loopback, rotating
+  refresh tokens) and servers that verify their audience as fileshare does.
+  Covered: one login per session, one refresh at a time for 20 concurrent calls,
+  a retry after a 401, an ended grant, logout, and a server reached only
+  through its `ca_file`. Removing the lock, the resource, the drop of a refused
+  token or the `invalid_grant` handling makes a test fail.
 
 Each defence was removed in turn, and a test failed each time:
 
