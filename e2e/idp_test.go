@@ -32,7 +32,10 @@ type testIdP struct {
 	issuer string
 
 	clientID, secret, redirect string
-	resources                  []string // what a resource indicator may name
+	// public: the client has no secret and names itself in the body; and any
+	// loopback port is a valid redirect (RFC 8252 §7.3).
+	public    bool
+	resources []string // what a resource indicator may name
 
 	mu       sync.Mutex
 	codes    map[string]codeGrant
@@ -45,6 +48,7 @@ type testIdP struct {
 	badNonce, noRefresh, noRotate, noS256, wrongIssuer bool
 	failRefreshFor                                     string // a resource whose refresh answers 500
 	extraAud                                           bool   // ID token with two audiences and no azp
+	noIDToken                                          bool
 }
 
 type codeGrant struct {
@@ -96,7 +100,7 @@ func (p *testIdP) jwks(w http.ResponseWriter, r *http.Request) {
 
 func (p *testIdP) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("client_id") != p.clientID || q.Get("redirect_uri") != p.redirect ||
+	if q.Get("client_id") != p.clientID || !p.redirectOK(q.Get("redirect_uri")) ||
 		q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") == "" {
 		http.Error(w, "bad authorization request", http.StatusBadRequest)
 		return
@@ -106,22 +110,22 @@ func (p *testIdP) authorize(w http.ResponseWriter, r *http.Request) {
 	p.codes[code] = codeGrant{challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), redirect: q.Get("redirect_uri")}
 	p.mu.Unlock()
 	v := url.Values{"code": {code}, "state": {q.Get("state")}, "iss": {p.issuer}}
-	http.Redirect(w, r, p.redirect+"?"+v.Encode(), http.StatusFound)
+	http.Redirect(w, r, q.Get("redirect_uri")+"?"+v.Encode(), http.StatusFound)
 }
 
 func (p *testIdP) token(w http.ResponseWriter, r *http.Request) {
-	id, secret, ok := r.BasicAuth()
-	if !ok {
-		tokenErr(w, "invalid_client")
-		return
-	}
+	_ = r.ParseForm()
+	id, secret, basic := r.BasicAuth()
 	id, _ = url.QueryUnescape(id)
 	secret, _ = url.QueryUnescape(secret)
-	if id != p.clientID || secret != p.secret {
+	switch {
+	case p.public && (basic || r.PostForm.Get("client_id") != p.clientID):
+		tokenErr(w, "invalid_client")
+		return
+	case !p.public && (!basic || id != p.clientID || secret != p.secret):
 		tokenErr(w, "invalid_client")
 		return
 	}
-	_ = r.ParseForm()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch r.PostForm.Get("grant_type") {
@@ -145,6 +149,9 @@ func (p *testIdP) token(w http.ResponseWriter, r *http.Request) {
 			"expires_in": 300, "id_token": p.sign("JWT", idc)}
 		if !p.noRefresh {
 			resp["refresh_token"] = p.newRefresh(random())
+		}
+		if p.noIDToken {
+			delete(resp, "id_token")
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	case "refresh_token":
@@ -225,6 +232,14 @@ func audOf(t *testing.T, jwt string) any {
 	var c map[string]any
 	_ = json.Unmarshal(b, &c)
 	return c["aud"]
+}
+
+func (p *testIdP) redirectOK(u string) bool {
+	if u == p.redirect {
+		return true
+	}
+	pu, err := url.Parse(u)
+	return p.public && err == nil && pu.Scheme == "http" && pu.Hostname() == "127.0.0.1" && pu.Path == "/callback"
 }
 
 func random() string {
