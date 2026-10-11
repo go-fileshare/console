@@ -26,6 +26,12 @@ import (
 	"github.com/go-fileshare/console/internal/admin"
 )
 
+// The pages.
+const (
+	tabShares = iota
+	tabVolumes
+)
+
 // accessNames are the access levels a grant can give, as the DropDowns show
 // them; the index is the choice.
 var accessNames = []string{"read", "write"}
@@ -60,6 +66,11 @@ type viewModel struct {
 
 	Reload, Create, Delete, Enable, Disable, Grant, Revoke, Logout *mvvm.Command
 
+	// Tab is the page shown: shares or volumes.
+	Tab *mvvm.Observable[int]
+	// Vol is the Volumes page (volumes.go).
+	Vol *volumeVM
+
 	// Pending counts calls in flight; Busy says so to the View.
 	pending int
 	Busy    *mvvm.Observable[bool]
@@ -77,7 +88,7 @@ func newViewModel(ctx context.Context, be admin.Backend, q *mvvm.Queue) *viewMod
 		Details: mvvm.NewObservableList[string](), Grants: mvvm.NewObservableList[*v1.Grant](), GrantSel: mvvm.NewObservable(-1),
 		NewName: mvvm.NewObservable(""), NewDir: mvvm.NewObservable(""), NewSubject: mvvm.NewObservable(""),
 		NewAccess: mvvm.NewObservable(0), GrantSubject: mvvm.NewObservable(""), GrantAccess: mvvm.NewObservable(0),
-		Busy: mvvm.NewObservable(false),
+		Busy: mvvm.NewObservable(false), Tab: mvvm.NewObservable(tabShares), Vol: newVolumeVM(),
 	}
 	server := func() bool { _, ok := vm.server(); return ok }
 	share := func() bool { _, ok := vm.share(); return ok }
@@ -100,6 +111,8 @@ func newViewModel(ctx context.Context, be admin.Backend, q *mvvm.Queue) *viewMod
 	mvvm.BindCanExecute(vm.Disable, vm.ShareSel, vm.Shares)
 	mvvm.BindCanExecute(vm.Grant, vm.ShareSel, vm.Shares, vm.GrantSubject)
 	mvvm.BindCanExecute(vm.Revoke, vm.GrantSel, vm.Grants)
+
+	vm.wireVolumes()
 
 	vm.ServerSel.SubscribeChanged(vm.loadServer)
 	vm.ShareSel.SubscribeChanged(vm.showShare)
@@ -197,6 +210,7 @@ func (vm *viewModel) loadServer() {
 	if !ok {
 		vm.ServerInfo.Set("")
 		vm.setShares(nil, "")
+		vm.loadVolumes("")
 		if i := vm.ServerSel.Get(); i >= 0 && i < vm.Servers.Len() {
 			vm.Status.Set(vm.Servers.At(i).Name() + " is behind another identity provider: log in there to manage it.")
 		}
@@ -207,6 +221,7 @@ func (vm *viewModel) loadServer() {
 		keep = sh.GetName()
 	}
 	vm.loadShares(s, keep)
+	vm.reloadVolumes()
 }
 
 type serverState struct {
@@ -284,9 +299,13 @@ func (vm *viewModel) create() {
 		vm.Status.Set("New share: " + err.Error())
 		return
 	}
-	req := &v1.CreateShareRequest{Name: name,
-		Source: &v1.CreateShareRequest_Directory{Directory: strings.TrimSpace(vm.NewDir.Get())},
-		Grants: []*v1.Grant{{Subject: subj, Access: access(vm.NewAccess.Get())}}}
+	req, err := shareSource(vm.NewDir.Get())
+	if err != nil {
+		vm.Status.Set("New share: " + err.Error())
+		return
+	}
+	req.Name = name
+	req.Grants = []*v1.Grant{{Subject: subj, Access: access(vm.NewAccess.Get())}}
 	c := vm.be.Client(sv.ID)
 	async(vm, "Create "+name, func(ctx context.Context) (*v1.CreateShareResponse, error) {
 		return c.CreateShare(ctx, req)
@@ -295,6 +314,7 @@ func (vm *viewModel) create() {
 		vm.NewDir.Set("")
 		vm.Status.Set("Share " + name + " created.")
 		vm.loadShares(sv, name)
+		vm.reloadVolumes() // a volume's shares changed
 	})
 }
 
@@ -315,6 +335,7 @@ func (vm *viewModel) delete() {
 	}, func(*v1.DeleteShareResponse) {
 		vm.Status.Set("Share " + name + " deleted.")
 		vm.loadShares(sv, "")
+		vm.reloadVolumes() // a volume may be free now
 	})
 }
 

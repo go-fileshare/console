@@ -192,6 +192,8 @@ type state struct {
 	Shares  []string `json:"shares"`
 	Busy    bool     `json:"busy"`
 	Info    string   `json:"info"`
+	VolNote string   `json:"volNote"`
+	Tab     int      `json:"tab"`
 }
 
 func TestE2EConsoleInABrowserBehindThePortal(t *testing.T) {
@@ -283,6 +285,15 @@ ui "console" { dir = %q }
 	if !strings.Contains(st.Status, "created") {
 		t.Fatalf("status %q", st.Status)
 	}
+	// Real fileshare here has no provisioner: the Volumes page says so,
+	// and the console does not take it for a failure.
+	if !strings.Contains(st.VolNote, "manages no volumes") {
+		t.Fatalf("volumes note %q", st.VolNote)
+	}
+	if _, err := chromedp.Run(ctx, chromedp.Evaluate[chromedp.Void](`consoleTab(1)`)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, ctx, "the Volumes page", func(s state) bool { return s.Tab == 1 }, portalOut)
 	capture(t, ctx)
 	if !strings.Contains(a.out.String(), "oidc="+idp.issuer+" alice-sub") {
 		t.Fatalf("A's audit does not name the caller:\n%s", a.out)

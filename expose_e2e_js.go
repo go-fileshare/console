@@ -23,8 +23,13 @@ func expose(vm *viewModel) {
 			servers = append(servers, s.ID)
 		}
 		b, _ := json.Marshal(map[string]any{"user": vm.User.Get(), "status": vm.Status.Get(),
-			"servers": servers, "shares": shares, "busy": vm.Busy.Get(), "info": vm.ServerInfo.Get()})
+			"servers": servers, "shares": shares, "busy": vm.Busy.Get(), "info": vm.ServerInfo.Get(),
+			"volNote": vm.Vol.Note.Get(), "tab": vm.Tab.Get()})
 		return string(b)
+	}))
+	js.Global().Set("consoleTab", js.FuncOf(func(_ js.Value, a []js.Value) any {
+		vm.Tab.Set(a[0].Int())
+		return nil
 	}))
 	// The one action the test takes through the ViewModel's own command: the
 	// click path is tested natively (scene_test.go); this one tests the trip.

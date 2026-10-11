@@ -52,6 +52,15 @@ type view struct {
 	newAccess, grantAccess           *toolkit.DropDown
 	reload, enable, disable, del     *toolkit.Button
 	create, grant, revoke, logout    *toolkit.Button
+	tabs                             *toolkit.Notebook
+
+	// The Volumes page.
+	volumes, volDetails                  *toolkit.ListBox
+	volNote                              *toolkit.Label
+	volName, volSize, volResize, volSnap *toolkit.Entry
+	volParent                            *toolkit.DropDown
+	volCreate, volResizeB, volSnapB      *toolkit.Button
+	volDelete, volShare                  *toolkit.Button
 }
 
 // newView builds the tree for vm. invalidate (may be nil) asks for a frame
@@ -68,9 +77,25 @@ func newView(vm *viewModel, q *mvvm.Queue, invalidate func()) *view {
 		disable: toolkit.NewButton("Disable", nil), del: toolkit.NewButton("Delete", nil),
 		create: toolkit.NewButton("Create", nil), grant: toolkit.NewButton("Grant", nil),
 		revoke: toolkit.NewButton("Revoke", nil), logout: toolkit.NewButton("Log out", nil),
+		tabs:    toolkit.NewNotebook(),
+		volumes: toolkit.NewListBox(nil), volDetails: toolkit.NewListBox(nil), volNote: toolkit.NewLabel(""),
+		volName: toolkit.NewEntry(""), volSize: toolkit.NewEntry(""), volResize: toolkit.NewEntry(""), volSnap: toolkit.NewEntry(""),
+		volParent: toolkit.NewDropDown(nil, 0),
+		volCreate: toolkit.NewButton("Create", nil), volResizeB: toolkit.NewButton("Resize", nil),
+		volSnapB: toolkit.NewButton("Snapshot", nil), volDelete: toolkit.NewButton("Delete", nil),
+		volShare: toolkit.NewButton("Share it", nil),
+	}
+	v.volName.Placeholder = "name"
+	v.volSize.Placeholder = "size: 500G, 2T"
+	v.volResize.Placeholder = "new size"
+	v.volSnap.Placeholder = "snapshot name"
+	// Lines that can be longer than their column end in an ellipsis rather
+	// than run over the next one.
+	for _, l := range []*toolkit.Label{v.info, v.volNote, v.status, v.user} {
+		l.Ellipsis = true
 	}
 	v.newName.Placeholder = "name"
-	v.newDir.Placeholder = "directory, under the server's source_roots"
+	v.newDir.Placeholder = "directory, under the server source_roots"
 	v.newSubject.Placeholder = "who: alice, @staff, oidc:groups:..."
 	v.grantSubject.Placeholder = "who: alice, @staff, oidc:groups:..."
 
@@ -96,6 +121,24 @@ func newView(vm *viewModel, q *mvvm.Queue, invalidate func()) *view {
 	mvvmtk.BindEntryText(v.grantSubject, vm.GrantSubject, invalidate)
 	mvvmtk.BindSelectedIndex(v.newAccess, vm.NewAccess, invalidate)
 	mvvmtk.BindSelectedIndex(v.grantAccess, vm.GrantAccess, invalidate)
+	vol := vm.Vol
+	mvvmtk.BindNotebook(v.tabs, vm.Tab, invalidate)
+	mvvmtk.BindLabel(v.volNote, vol.Note, invalidate)
+	mvvmtk.BindListItems(v.volumes, vol.Volumes, volumeLine, invalidate)
+	mvvmtk.BindListSelection(v.volumes, vol.VolSel, invalidate)
+	mvvmtk.BindListItems(v.volDetails, vol.Details, func(s string) string { return s }, invalidate)
+	mvvmtk.BindDropDownOptions(v.volParent, vol.Parents, parentLine, invalidate)
+	mvvmtk.BindSelectedIndex(v.volParent, vol.NewParent, invalidate)
+	mvvmtk.BindEntryText(v.volName, vol.NewName, invalidate)
+	mvvmtk.BindEntryText(v.volSize, vol.NewSize, invalidate)
+	mvvmtk.BindEntryText(v.volResize, vol.Resize, invalidate)
+	mvvmtk.BindEntryText(v.volSnap, vol.SnapName, invalidate)
+	for b, c := range map[*toolkit.Button]*mvvm.Command{
+		v.volCreate: vol.Create, v.volResizeB: vol.DoResize, v.volSnapB: vol.Snapshot,
+		v.volDelete: vol.Delete, v.volShare: vol.Share,
+	} {
+		mvvmtk.BindCommand(b, c, invalidate)
+	}
 	for b, c := range map[*toolkit.Button]*mvvm.Command{
 		v.reload: vm.Reload, v.enable: vm.Enable, v.disable: vm.Disable, v.del: vm.Delete,
 		v.create: vm.Create, v.grant: vm.Grant, v.revoke: vm.Revoke, v.logout: vm.Logout,
@@ -142,10 +185,41 @@ func newView(vm *viewModel, q *mvvm.Queue, invalidate func()) *view {
 	right.Append(v.grants)
 	right.AddFixed(grantRow, rowH)
 
+	sharesPage := toolkit.NewHBox()
+	sharesPage.AddFlex(middle, 3)
+	sharesPage.AddFlex(right, 2)
+
+	volActions := toolkit.NewHBox()
+	volActions.Append(v.volResize)
+	volActions.AddFixed(v.volResizeB, buttonW)
+	volActions.Append(v.volSnap)
+	volActions.AddFixed(v.volSnapB, buttonW)
+	volActions.AddFixed(v.volShare, buttonW)
+	volActions.AddFixed(v.volDelete, buttonW)
+	newVol := toolkit.NewHBox()
+	newVol.Append(v.volName)
+	newVol.AddFlex(v.volParent, 2)
+	newVol.Append(v.volSize)
+	newVol.AddFixed(v.volCreate, buttonW)
+	volList := toolkit.NewVBox()
+	volList.AddFixed(v.volNote, titleH)
+	volList.Append(v.volumes)
+	volList.AddFixed(volActions, rowH)
+	volList.AddFixed(toolkit.NewLabel("New volume"), titleH)
+	volList.AddFixed(newVol, rowH)
+	volRight := toolkit.NewVBox()
+	volRight.AddFixed(toolkit.NewLabel("Details"), titleH)
+	volRight.Append(v.volDetails)
+	volumesPage := toolkit.NewHBox()
+	volumesPage.AddFlex(volList, 3)
+	volumesPage.AddFlex(volRight, 2)
+
+	v.tabs.AddTab("Shares", sharesPage)
+	v.tabs.AddTab("Volumes", volumesPage)
+
 	body := toolkit.NewHBox()
 	body.AddFixed(left, sideW)
-	body.AddFlex(middle, 3)
-	body.AddFlex(right, 2)
+	body.Append(v.tabs)
 
 	col := toolkit.NewVBox()
 	col.AddFixed(header, rowH)
