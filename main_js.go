@@ -22,7 +22,7 @@ func main() {
 	origin := js.Global().Get("location").Get("origin").String()
 	// The lock every UI of the portal takes (the explorer too): they share
 	// one session, so one refresh at a time across all their tabs.
-	be := admin.NewPortal(origin, nil, client.WebLocks("fileshare-portal-refresh"))
+	be := admin.NewPortal(origin, nil, client.WebLocks(client.RefreshLock))
 
 	w, err := window.Open(window.Config{Title: "fileshare console", Canvas: "screen"})
 	if err != nil {

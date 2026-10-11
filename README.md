@@ -37,8 +37,8 @@ which the explorer uses too):
 - **One refresh at a time, across tabs.** A provider that rotates refresh tokens
   ends the whole login when one is spent twice. Refreshes therefore go through
   the browser's Web Locks API, so two tabs never refresh together, nor a
-  console and an explorer tab, which share the session: both take the lock
-  `fileshare-portal-refresh`. Before each refresh, the console checks whether
+  console and an explorer tab, which share the session: both take
+  `client.RefreshLock`. Before each refresh, the console checks whether
   another tab has just done it.
 - **The portal's CSRF defence.** Every call carries `Portal-Request: 1`. The page
   loads no inline script, which the portal's Content-Security-Policy would
@@ -91,6 +91,10 @@ server "paris" {
 - A server that refuses its token gets one refresh and one retry. A grant that
   has ended means logging in again, in the browser.
 - **Only https servers.** A bearer token sent in the clear is anybody's.
+- **No redirect is followed** (since v0.3.2). Go's client keeps
+  `Authorization` across a redirect to the same host on any scheme or port, so
+  a `307 http://...` from a misconfigured proxy would have sent the token in
+  clear. go-authn/rp v0.1.1 does the same for the provider's token endpoint.
 
 ## What it does
 

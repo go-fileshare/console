@@ -300,3 +300,40 @@ func TestDirectServerCA(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A server that redirects is not followed. Go's client keeps Authorization
+// on a redirect to the same host -- or a subdomain -- whatever the scheme or
+// port, so following one would hand the token to whatever answers there. The
+// listener on the other end records what reaches it.
+func TestDirectFollowsNoRedirect(t *testing.T) {
+	var leaked atomic.Value
+	other := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		leaked.Store(r.Header.Get("Authorization"))
+	}))
+	defer other.Close()
+	w := newDirect(t)
+	ctx := context.Background()
+	if _, err := w.d.Session(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hop := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		http.Redirect(rw, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer hop.Close()
+	hc, err := serverClient(w.d.cfg.Servers[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &directHTTP{d: w.d, sv: w.d.cfg.Servers[0], hc: hc}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, hop.URL+"/fileshare.admin.v1.AdminService/ListShares", strings.NewReader("{}"))
+	res, err := h.Do(req)
+	if err == nil {
+		res.Body.Close()
+	}
+	if v, _ := leaked.Load().(string); v != "" {
+		t.Fatalf("the token followed a redirect: %.20s...", v)
+	}
+	if err != nil || res.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("want the redirect answered as it is: %v %v", err, res)
+	}
+}
