@@ -106,10 +106,7 @@ jobs:
   mvvm:
     name: MVVM gate
     uses: go-widgets/mvvmlint/.github/workflows/mvvmlint.yml@main
-    # Its default is 1.27.1, with GOTOOLCHAIN=local: it could not build a
-    # module that requires 1.27.2 (GO-2026-6617), and failed before linting.
-    with:
-      go-version: "1.27.2"
+    # It sets up the Go this go.mod requires (go-widgets/mvvmlint#12).
 
   bricolint:
     name: Hand-drawn-UI gate
