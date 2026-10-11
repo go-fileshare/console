@@ -15,8 +15,8 @@ env:
   CGO_ENABLED: "0"
   # The fileshare release whose admin.proto internal/adminpb is generated
   # from, and the portal the browser test runs behind.
-  FILESHARE_VERSION: v0.28.1
-  PORTAL_VERSION: v0.1.2
+  FILESHARE_VERSION: v0.29.0
+  PORTAL_VERSION: v0.2.0
 
 jobs:
   test:

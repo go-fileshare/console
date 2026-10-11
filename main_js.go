@@ -8,18 +8,21 @@ package main
 
 import (
 	"context"
-	"sync"
 	"syscall/js"
 
 	"github.com/go-widgets/mvvm"
 	"github.com/go-widgets/window"
+
+	"github.com/go-fileshare/portal/client"
 
 	"github.com/go-fileshare/console/internal/admin"
 )
 
 func main() {
 	origin := js.Global().Get("location").Get("origin").String()
-	be := admin.NewPortal(origin, nil, webLocks)
+	// The lock every UI of the portal takes (the explorer too): they share
+	// one session, so one refresh at a time across all their tabs.
+	be := admin.NewPortal(origin, nil, client.WebLocks("fileshare-portal-refresh"))
 
 	w, err := window.Open(window.Config{Title: "fileshare console", Canvas: "screen"})
 	if err != nil {
@@ -41,39 +44,4 @@ func main() {
 	expose(vm)
 	vm.Start()
 	_ = w.Run(v.root)
-}
-
-var tabMu sync.Mutex
-
-// webLocks runs fn while holding a lock every tab of this origin shares (the
-// Web Locks API), so that two tabs never refresh at once: a provider that
-// rotates refresh tokens ends the login when one is spent twice. A browser
-// without the API gets this tab's own lock.
-func webLocks(fn func() error) error {
-	locks := js.Global().Get("navigator").Get("locks")
-	if !locks.Truthy() {
-		tabMu.Lock()
-		defer tabMu.Unlock()
-		return fn()
-	}
-	done := make(chan error, 1)
-	var inner js.Func
-	outer := js.FuncOf(func(js.Value, []js.Value) any {
-		// The lock is held until the promise returned here settles.
-		inner = js.FuncOf(func(_ js.Value, a []js.Value) any {
-			resolve := a[0]
-			go func() {
-				err := fn()
-				resolve.Invoke()
-				done <- err
-			}()
-			return nil
-		})
-		return js.Global().Get("Promise").New(inner)
-	})
-	defer outer.Release()
-	locks.Call("request", "fileshare-portal-refresh", outer)
-	err := <-done
-	inner.Release()
-	return err
 }

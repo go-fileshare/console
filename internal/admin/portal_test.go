@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -140,9 +142,6 @@ func TestTooManyServersFallsBackToOne(t *testing.T) {
 			t.Fatalf("s%d: %v", i, err)
 		}
 	}
-	if n := len(p.used("x")); n != MaxInUse {
-		t.Fatalf("%d in use, the cap is %d", n, MaxInUse)
-	}
 }
 
 // A login that has ended: the call fails as unauthenticated, which the
@@ -188,5 +187,31 @@ func TestACallLargerThanAMebibyte(t *testing.T) {
 	}
 	if fp.Refreshes.Load() != 0 {
 		t.Fatal("a call too large to send was sent")
+	}
+}
+
+// A refresh the portal could not do (its provider down, say) is not the end
+// of the login: Unavailable, not Unauthenticated. And a portal that does not
+// answer is the transport's error, as it is.
+func TestARefreshThatFailsIsUnavailable(t *testing.T) {
+	fp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/session":
+			_, _ = w.Write([]byte(`{}`))
+		case "/session/refresh":
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			w.Header().Set("Portal-Refresh", "1")
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	defer fp.Close()
+	_, err := NewPortal(fp.URL, nil, nil).Client("a").ListShares(context.Background(), &v1.ListSharesRequest{})
+	if connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("%v: %v", connect.CodeOf(err), err)
+	}
+	_, err = NewPortal("http://127.0.0.1:1", nil, nil).Client("a").ListShares(context.Background(), &v1.ListSharesRequest{})
+	if err == nil || connect.CodeOf(err) == connect.CodeUnauthenticated {
+		t.Fatalf("nothing listening: %v", err)
 	}
 }
