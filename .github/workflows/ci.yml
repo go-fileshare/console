@@ -16,7 +16,7 @@ env:
   # The fileshare release whose admin.proto internal/adminpb is generated
   # from, and the portal the browser test runs behind.
   FILESHARE_VERSION: v0.29.0
-  PORTAL_VERSION: v0.2.0
+  PORTAL_VERSION: v0.3.0
 
 jobs:
   test:

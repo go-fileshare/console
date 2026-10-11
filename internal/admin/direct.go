@@ -191,6 +191,12 @@ func (d *Direct) Client(server string) adminv1connect.AdminServiceClient {
 }
 
 // serverClient is the HTTP client of one server: its CA when it has one.
+//
+// ⛔ It follows no redirect. Go's client keeps Authorization on a redirect
+// to the same host or a subdomain whatever the scheme or port, so a 307 --
+// a misconfigured proxy in front of the server -- would hand the token to
+// whatever answers there, in clear if it is http://. The admin API has no
+// use for one; it is answered as it is, an error.
 func serverClient(sv DirectServer) (*http.Client, error) {
 	tc := &tls.Config{MinVersion: tls.VersionTLS12}
 	if sv.CAFile != "" {
@@ -204,9 +210,11 @@ func serverClient(sv DirectServer) (*http.Client, error) {
 		}
 		tc.RootCAs = pool
 	}
-	return &http.Client{Timeout: 60 * time.Second, Transport: &http.Transport{TLSClientConfig: tc, ForceAttemptHTTP2: true,
+	return &http.Client{Timeout: 60 * time.Second, CheckRedirect: noRedirect, Transport: &http.Transport{TLSClientConfig: tc, ForceAttemptHTTP2: true,
 		Proxy: http.ProxyFromEnvironment, TLSHandshakeTimeout: 10 * time.Second}}, nil
 }
+
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // directHTTP adds the server's token, and when the server refuses it (401),
 // refreshes once and sends the call again.

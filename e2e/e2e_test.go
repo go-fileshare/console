@@ -5,7 +5,7 @@
 // fileshare binaries, with an OpenID provider written for the test. It is a
 // module of its own so that the console does not depend on chromedp.
 //
-//	go install github.com/go-fileshare/portal@v0.2.0
+//	go install github.com/go-fileshare/portal@v0.3.0
 //	go install github.com/go-fileshare/fileshare@v0.29.0
 //	PORTAL=$(go env GOPATH)/bin/portal FILESHARE=$(go env GOPATH)/bin/fileshare go test -v ./...
 //
