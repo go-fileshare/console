@@ -98,6 +98,7 @@ server "paris" {
 | **enable / disable** | disabling closes its connections and lets go of its source |
 | **delete** | two presses; the files stay where they are |
 | **grant / revoke** | `alice`, `@group`, `oidc:groups:<group>`, `oidc:user:<name>`, as in fileshare's configuration file; revoking the last grant is refused by the server |
+| **volumes** | on a server with fileshare's provisioner: the parents (ZFS, btrfs, XFS, ext4) with their free space; each volume's quota, use, snapshots and the shares that use it. **Create** (`500G`, `2T`: binary units, at most the server's `max_volume`), **resize** (never below what is used), **snapshot** (ZFS and btrfs only; elsewhere the button is greyed), **share it** (the share form gets `volume:<parent>/<name>` as its source), **delete** (two presses, refused while a share uses it). The console **never destroys data**: a volume that holds data or snapshots is refused by the server, and the console says so. Destroying data is not something to do from a list with a button. A server without a provisioner is shown as such, not as a failure |
 
 ## How it is built
 
@@ -143,6 +144,16 @@ go test -race ./...
   for a frame that never comes. A second test runs the native backend against
   the same two real servers: loopback login as a public client, a token per
   server, a share created on A and audited there.
+- **Volumes:** a stand-in server with a provisioner (ZFS that snapshots, XFS
+  that does not). Covered: create (and the same again), resize (refused below
+  use before the server is asked), snapshot, share it, delete refused while
+  shared, refused when it holds data, deleted when empty, a server without a
+  provisioner, and every form refusal before the server is asked. Each of these
+  makes a test fail when removed: sending `destroy_data`, deleting in one
+  press, a resize below use reaching the server, no reload after a share is
+  deleted, a missing provisioner shown as a failure, snapshots offered
+  everywhere. Against real fileshare, the browser test checks the
+  no-provisioner page.
 - **Native backend:** in-process provider (public client, loopback, rotating
   refresh tokens) and servers that verify their audience as fileshare does.
   Covered: one login per session, one refresh at a time for 20 concurrent calls,

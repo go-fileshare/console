@@ -64,7 +64,7 @@ jobs:
       # main(), which opens a window and the system browser.
       - run: |
           set -o pipefail
-          FLOOR=90.0
+          FLOOR=92.0
           go test -coverprofile=cover.out -coverpkg=github.com/go-fileshare/console,github.com/go-fileshare/console/internal/admin ./... >/dev/null
           go tool cover -func=cover.out | grep -v "100.0%"
           cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')

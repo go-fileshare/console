@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-fileshare/console/internal/admin"
 	"github.com/go-fileshare/console/internal/admin/admintest"
+	v1 "github.com/go-fileshare/console/internal/adminpb"
 )
 
 func main() {
@@ -30,7 +31,9 @@ func main() {
 	if *demo {
 		fp := admintest.New(true,
 			admintest.NewServer("paris", "Paris", admintest.Share("photos", "/srv/photos", "alice", true),
-				admintest.Share("archive", "/srv/archive", "@staff", false)),
+				admintest.Share("archive", "/srv/archive", "@staff", false)).WithVolumes(10<<40,
+				&v1.Parent{Id: "tank", Kind: v1.VolumeKind_VOLUME_KIND_ZFS, Root: "/srv/tank", Snapshots: true, FreeBytes: 6 << 40, TotalBytes: 8 << 40},
+				&v1.Parent{Id: "plain", Kind: v1.VolumeKind_VOLUME_KIND_XFS, Root: "/srv/plain"}),
 			admintest.NewServer("lyon", "Lyon", admintest.Share("scratch", "/srv/scratch", "oidc:groups:hpc", true)))
 		defer fp.Close()
 		be = admin.NewPortal(fp.URL, nil, nil)

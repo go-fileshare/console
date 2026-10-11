@@ -67,6 +67,12 @@ type Server struct {
 	Calls atomic.Int64
 	// Fail, when set, is answered to every call.
 	Fail error
+
+	parents   []*v1.Parent
+	maxVolume uint64
+	volumes   map[string]*v1.Volume
+	// Destroyed is set when a delete ever asked to destroy data.
+	Destroyed bool
 }
 
 // New starts a fake portal with the given servers, logged in or not.
@@ -276,6 +282,12 @@ func (s *Server) CreateShare(_ context.Context, r *v1.CreateShareRequest) (*v1.C
 	}
 	sh := &v1.Share{Name: r.GetName(), Source: &v1.Share_Directory{Directory: r.GetDirectory()},
 		Grants: r.GetGrants(), Enabled: !r.GetDisabled(), Origin: v1.Origin_ORIGIN_API}
+	if ref := r.GetVolume(); ref != nil {
+		if _, ok := s.volumes[ref.GetParent()+"/"+ref.GetName()]; !ok {
+			return nil, connect.NewError(connect.CodeNotFound, "no volume "+ref.GetParent()+"/"+ref.GetName())
+		}
+		sh.Source = &v1.Share_Volume{Volume: ref}
+	}
 	s.shares[sh.Name] = sh
 	return &v1.CreateShareResponse{Share: sh}, nil
 }
@@ -362,4 +374,180 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, srv)
 	return mux
+}
+
+// --- volumes ------------------------------------------------------------------
+
+// WithVolumes gives the server a provisioner with these parents, as
+// fileshare's admin block names one. Without it, every volume call answers
+// FAILED_PRECONDITION, as fileshare does with no provisioner configured.
+func (s *Server) WithVolumes(maxBytes uint64, parents ...*v1.Parent) *Server {
+	s.parents, s.maxVolume = parents, maxBytes
+	if s.volumes == nil {
+		s.volumes = map[string]*v1.Volume{}
+	}
+	return s
+}
+
+// Use pretends bytes are written into a volume, as a share's clients would.
+func (s *Server) Use(parent, name string, used uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if vol, ok := s.volumes[parent+"/"+name]; ok {
+		vol.UsedBytes = used
+	}
+}
+
+func (s *Server) noProvisioner() error {
+	if s.parents == nil {
+		return connect.NewError(connect.CodeFailedPrecondition, "no provisioner block in the admin configuration")
+	}
+	return nil
+}
+
+func (s *Server) parent(id string) *v1.Parent {
+	for _, p := range s.parents {
+		if p.GetId() == id {
+			return p
+		}
+	}
+	return nil
+}
+
+func (s *Server) ListParents(context.Context, *v1.ListParentsRequest) (*v1.ListParentsResponse, error) {
+	if err := s.noProvisioner(); err != nil {
+		return nil, err
+	}
+	return &v1.ListParentsResponse{Parents: s.parents, MaxVolumeBytes: s.maxVolume}, nil
+}
+
+func (s *Server) ListVolumes(_ context.Context, r *v1.ListVolumesRequest) (*v1.ListVolumesResponse, error) {
+	if err := s.noProvisioner(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var keys []string
+	for k, vol := range s.volumes {
+		if r.GetParent() == "" || vol.GetParent() == r.GetParent() {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	out := &v1.ListVolumesResponse{}
+	for _, k := range keys {
+		out.Volumes = append(out.Volumes, s.withShares(s.volumes[k]))
+	}
+	return out, nil
+}
+
+// withShares fills in which shares use vol: made from it.
+func (s *Server) withShares(vol *v1.Volume) *v1.Volume {
+	vol.Shares = nil
+	for _, sh := range s.list() {
+		if ref := sh.GetVolume(); ref != nil && ref.GetParent() == vol.GetParent() && ref.GetName() == vol.GetName() {
+			vol.Shares = append(vol.Shares, sh.GetName())
+		}
+	}
+	return vol
+}
+
+func (s *Server) CreateVolume(_ context.Context, r *v1.CreateVolumeRequest) (*v1.CreateVolumeResponse, error) {
+	if err := s.noProvisioner(); err != nil {
+		return nil, err
+	}
+	p := s.parent(r.GetParent())
+	switch {
+	case p == nil:
+		return nil, connect.NewError(connect.CodeInvalidArgument, "no parent "+r.GetParent())
+	case r.GetQuotaBytes() == 0:
+		return nil, connect.NewError(connect.CodeInvalidArgument, "a quota of 0")
+	case s.maxVolume > 0 && r.GetQuotaBytes() > s.maxVolume:
+		return nil, connect.NewError(connect.CodeOutOfRange, "above max_volume")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := r.GetParent() + "/" + r.GetName()
+	if vol, ok := s.volumes[key]; ok {
+		if vol.GetQuotaBytes() != r.GetQuotaBytes() {
+			return nil, connect.NewError(connect.CodeAlreadyExists, key+" exists with another quota")
+		}
+		return &v1.CreateVolumeResponse{Volume: vol}, nil
+	}
+	vol := &v1.Volume{Parent: p.GetId(), Name: r.GetName(), Kind: p.GetKind(), Path: p.GetRoot() + "/" + r.GetName(),
+		QuotaBytes: r.GetQuotaBytes()}
+	s.volumes[key] = vol
+	return &v1.CreateVolumeResponse{Volume: vol, Created: true}, nil
+}
+
+func (s *Server) vol(parent, name string) (*v1.Volume, error) {
+	if err := s.noProvisioner(); err != nil {
+		return nil, err
+	}
+	vol, ok := s.volumes[parent+"/"+name]
+	if !ok {
+		return nil, connect.NewError(connect.CodeNotFound, "no volume "+parent+"/"+name)
+	}
+	return vol, nil
+}
+
+func (s *Server) ResizeVolume(_ context.Context, r *v1.ResizeVolumeRequest) (*v1.ResizeVolumeResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vol, err := s.vol(r.GetParent(), r.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if r.GetQuotaBytes() == 0 || r.GetQuotaBytes() < vol.GetUsedBytes() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "below what is used")
+	}
+	vol.QuotaBytes = r.GetQuotaBytes()
+	return &v1.ResizeVolumeResponse{Volume: vol}, nil
+}
+
+func (s *Server) SnapshotVolume(_ context.Context, r *v1.SnapshotVolumeRequest) (*v1.SnapshotVolumeResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vol, err := s.vol(r.GetParent(), r.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if p := s.parent(vol.GetParent()); !p.GetSnapshots() {
+		return nil, connect.NewError(connect.CodeUnimplemented, "no snapshots of "+p.GetKind().String())
+	}
+	if slices.Contains(vol.Snapshots, r.GetSnapshot()) {
+		return &v1.SnapshotVolumeResponse{Volume: vol}, nil
+	}
+	vol.Snapshots = append(vol.Snapshots, r.GetSnapshot())
+	return &v1.SnapshotVolumeResponse{Volume: vol, Created: true}, nil
+}
+
+func (s *Server) DeleteVolume(_ context.Context, r *v1.DeleteVolumeRequest) (*v1.DeleteVolumeResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vol, err := s.vol(r.GetParent(), r.GetName())
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(s.withShares(vol).GetShares()) > 0:
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "a share uses it: delete the share first")
+	case !r.GetDestroyData() && (vol.GetUsedBytes() > 0 || len(vol.GetSnapshots()) > 0):
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "it holds data or snapshots")
+	}
+	s.Destroyed = s.Destroyed || r.GetDestroyData()
+	delete(s.volumes, r.GetParent()+"/"+r.GetName())
+	return &v1.DeleteVolumeResponse{Deleted: true}, nil
+}
+
+// VolumeNames is the volumes on s, parent/name, sorted.
+func (s *Server) VolumeNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for k := range s.volumes {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
