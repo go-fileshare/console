@@ -3,8 +3,8 @@ module github.com/go-fileshare/console/e2e
 go 1.27.2
 
 require (
-	github.com/chromedp/chromedp v0.20.1
-	github.com/go-fileshare/console v0.0.0
+	github.com/chromedp/chromedp v0.21.0
+	github.com/go-fileshare/console v0.3.2
 )
 
 require (
