@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/chromedp/chromedp v0.21.0
-	github.com/go-fileshare/console v0.0.0
+	github.com/go-fileshare/console v0.3.3
 )
 
 require (
