@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	connectrpc.com/connect/v2 v2.0.1
-	github.com/go-authn/oidc v0.4.0
+	github.com/go-authn/oidc v0.4.1
 	github.com/go-authn/rp v0.1.1
 	github.com/go-fileshare/portal v0.3.1
 	github.com/go-widgets/mvvm v0.15.0
