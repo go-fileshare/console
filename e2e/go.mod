@@ -4,11 +4,11 @@ go 1.27.2
 
 require (
 	github.com/chromedp/chromedp v0.21.0
-	github.com/go-fileshare/console v0.3.3
+	github.com/go-fileshare/console v0.3.4
 )
 
 require (
-	connectrpc.com/connect/v2 v2.0.0 // indirect
+	connectrpc.com/connect/v2 v2.0.1 // indirect
 	github.com/chromedp/cdproto v0.157.9 // indirect
 	github.com/go-authn/oidc v0.4.0 // indirect
 	github.com/go-authn/rp v0.1.1 // indirect
