@@ -1,6 +1,6 @@
 module github.com/go-fileshare/console/e2e
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/chromedp/chromedp v0.24.0
