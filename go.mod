@@ -10,7 +10,7 @@ require (
 	github.com/go-widgets/mvvm v0.15.0
 	github.com/go-widgets/mvvmtk v0.16.0
 	github.com/go-widgets/painter v0.17.1
-	github.com/go-widgets/toolkit v0.385.0
+	github.com/go-widgets/toolkit v0.390.0
 	github.com/go-widgets/window v0.93.0
 	github.com/hashicorp/hcl/v2 v2.25.0
 	google.golang.org/protobuf v1.36.12
